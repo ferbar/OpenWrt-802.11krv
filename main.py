@@ -2,6 +2,7 @@
 # https://claude.ai/chat/1b2be424-79aa-4844-8e58-d62c609af64c
 # sudo zypper install python3-colorama python3-paramiko
 # sudo zypper install python311-paramiko python311-colorama
+# --apply => auch wenn dry_run=1 applien
 #!/usr/bin/env python3
 """
 OpenWrt 802.11r/k/v Auto-Configuration Script
@@ -26,9 +27,12 @@ import sys
 import os
 import secrets
 import time
+import argparse
+
 from typing import Dict, List, Any, Tuple
 from colorama import Fore, Style, init
 from helpers import APInfo, SSHConnection, parse_iw_dev, generate_neighbor_report
+from pprint import pprint
 
 init(autoreset=True)
 
@@ -91,7 +95,7 @@ def collect_ap_info(hostname: str, ssid: str) -> APInfo:
             
             if not ap_info.interface_24 and not ap_info.interface_5:
                 print(f"{Fore.RED}ERROR: No matching SSID found!{Style.RESET_ALL}")
-                print(output)
+                pprint(interfaces)
                 return None
             
             print(f"{Fore.GREEN}OK{Style.RESET_ALL}")
@@ -111,42 +115,51 @@ def collect_ap_info(hostname: str, ssid: str) -> APInfo:
         raise
 
 
-def ensure_package_installed(hostname: str, dry_run: bool = False) -> bool:
-    """Ensure static-neighbor-report package is installed"""
+def ensure_package_installed(hostname: str, package: str, dry_run: bool = False, remove: list[str] = None) -> bool:
+    """Ensure static-neighbor-reports package is installed"""
+
+    print(f"  Checking {package} package...", end=" ", flush=True)
+
     
     try:
         with SSHConnection(hostname) as ssh:
-            print(f"  Checking static-neighbor-report package...", end=" ", flush=True)
-            installed = ssh.run("opkg list-installed | grep static-neighbor-report || echo ''")
+            ssh.run("which opkg")
+            has_opkg = not ssh.last_rc
+            ssh.run("which apk")
+            has_apk = not ssh.last_rc
+            if(not has_apk and not has_opkg):
+                raise Exception("didn't find apk or opkg")
+            if(has_opkg):
+                cmd_is_installed=f"opkg list-installed | grep {package} || echo ''"
+                cmd_install=f"opkg update > /dev/null 2>&1 && opkg install {package}"
+            else:
+                cmd_is_installed=f"apk info 2>/dev/null | grep {package} || echo ''"
+                # es können nicht alle pkg quellen runtergeladen werden, daher is uns der RC einmal wurscht...
+                cmd_install=f"apk update ; apk add {package}"
+
+
+            installed = ssh.run(cmd_is_installed)
             if not installed.strip():
                 print(f"{Fore.YELLOW}NOT INSTALLED{Style.RESET_ALL}")
+                if remove:
+                    print(f"!!!!!!!!!!!!!!! please remove {remove} manually!!!!!!!!!!!!!!!!!!!!!!!!!!")
                 
                 if dry_run:
                     print(f"    {Fore.YELLOW}[DRY RUN] Would install package{Style.RESET_ALL}")
+                    print(f"    {Fore.GREEN}          {cmd_install}{Style.RESET_ALL}")
+                    return True
                 else:
                     print(f"    Installing...", end=" ", flush=True)
-                    ssh.run("opkg update > /dev/null 2>&1 && opkg install static-neighbor-report")
-                    print(f"{Fore.GREEN}OK{Style.RESET_ALL}")
-            else:
-                print(f"{Fore.GREEN}OK{Style.RESET_ALL}")
-
-            print(f"  Checking wpad-mbedtls...", end=" ", flush=True)
-            installed = ssh.run("opkg list-installed | grep wpad-mbedtls || echo ''")
-            if not installed.strip():
-                print(f"{Fore.YELLOW}NOT INSTALLED{Style.RESET_ALL}")
-                
-                if dry_run:
-                    print(f"    {Fore.YELLOW}[DRY RUN] Would install{Style.RESET_ALL}")
-                else:
-                    print(f"    Installing...", end=" ", flush=True)
-                    ssh.run("opkg update > /dev/null 2>&1 && opkg remove wpad-basic wpad-basic-mbedtls && opkg install wpad-mbedtls")
-                    print(f"{Fore.GREEN}OK{Style.RESET_ALL}")
+                    ssh.run(cmd_install)
+                    if(ssh.last_rc != 0):
+                        raise Exception(f"Error installing package {package}! {cmd_install} -> {ssh.last_error}")
             else:
                 print(f"{Fore.GREEN}OK{Style.RESET_ALL}")
             return True
     except Exception as e:
         print(f"{Fore.RED}ERROR: {e}{Style.RESET_ALL}")
-        return False
+        print(f"  {Fore.YELLOW}Please install manually: opkg install {package}{Style.RESET_ALL}")
+        sys.exit(1)
 
 
 def configure_neighbors(ap: APInfo, all_aps: List[APInfo], ssid: str, dry_run: bool = False):
@@ -154,7 +167,11 @@ def configure_neighbors(ap: APInfo, all_aps: List[APInfo], ssid: str, dry_run: b
     print(f"\n{Fore.GREEN}Configuring neighbors on {ap.hostname}:{Style.RESET_ALL}")
 
     # Check/install package
-    if not ensure_package_installed(ap.hostname, dry_run):
+    #openwrt 25.12: static-neighbor-reports mit 's'
+    if not ensure_package_installed(ap.hostname, "static-neighbor-reports", dry_run):
+        return
+
+    if not ensure_package_installed(ap.hostname, "wpad-mbedtls", dry_run, ['wpad-basic', 'wpad-basic-mbedtls'] ):
         return
 
     # Delete old neighbor entries
@@ -398,6 +415,11 @@ def main():
     ssh_user = config['ssh_user']
     dry_run = config['dry_run']
     ap_hosts = config['ap_hosts']
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--apply", action="store_true")
+    args = parser.parse_args()
+    if args.apply:
+        dry_run = False
     
     print(f"Configuration:")
     print(f"  SSID: {ssid}")
@@ -469,8 +491,7 @@ def main():
         print("DRY RUN Complete - Review output above")
         print(f"{'='*70}{Style.RESET_ALL}\n")
         print(f"{Fore.YELLOW}To apply changes:{Style.RESET_ALL}")
-        print('  1. Edit roaming-config.json and set: "dry_run": false')
-        print("  2. Run script again")
+        print("  Run script again with --apply")
     else:
         print("Configuration Complete!")
         print(f"{'='*70}{Style.RESET_ALL}\n")

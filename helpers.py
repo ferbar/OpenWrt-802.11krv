@@ -180,12 +180,14 @@ def parse_iw_dev(output: str) -> List[APInterface]:
 
 class SSHConnection:
     """Simple SSH connection wrapper"""
-    
+
     def __init__(self, hostname: str, username: str = 'root'):
         self.hostname = hostname
         self.username = username
         self.client = None
-    
+        self.last_rc = None
+        self.last_error = None
+
     def __enter__(self):
         self.client = paramiko.SSHClient()
         self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -196,25 +198,27 @@ class SSHConnection:
                 username=self.username,
                 look_for_keys=True,
                 allow_agent=True,
-                timeout=10
+                # das apk update kann laang dauern
+                timeout=100
             )
         except Exception as e:
             raise ConnectionError(f"Failed to connect to {self.hostname}: {e}")
         
         return self
-    
+
     def __exit__(self, *args):
         if self.client:
             self.client.close()
-    
+
     def run(self, command: str) -> str:
         """Execute command and return output"""
         stdin, stdout, stderr = self.client.exec_command(command)
+        self.last_rc = stdout.channel.recv_exit_status()
         output = stdout.read().decode('utf-8')
-        error = stderr.read().decode('utf-8')
+        self.last_error = stderr.read().decode('utf-8')
         
-        if error and 'warning' not in error.lower():
-            raise Exception(f"Command failed: {error}")
+        if self.last_error and 'warning' not in self.last_error.lower():
+            raise Exception(f"Command {command} failed: {self.last_error}")
         
         return output
 
@@ -222,7 +226,6 @@ class SSHConnection:
 # ============================================================================
 # Neighbor Report Generation
 # ============================================================================
-
 def generate_neighbor_report(mac: str, channel: int) -> str:
     """
     Generate 802.11k neighbor report string
@@ -239,23 +242,31 @@ def generate_neighbor_report(mac: str, channel: int) -> str:
 
     # Operating Class
     if channel <= 14:
-        op_class = "51"  # 2.4 GHz
+        op_class = "51"  # 2.4 GHz (decimal 81 = 0x51 hex!)
     elif channel >= 36 and channel <= 64:
-        op_class = "73"  # 5 GHz lower
+        op_class = "73"  # 5 GHz lower (5.15-5.35 GHz)
     elif channel >= 100 and channel <= 144:
-        op_class = "73"  # 5 GHz middle
+        op_class = "73"  # 5 GHz middle (5.47-5.725 GHz)
     elif channel >= 149:
-        op_class = "7c"  # 5 GHz upper
+        op_class = "7c"  # 5 GHz upper (5.725-5.875 GHz)
     else:
         op_class = "51"  # Fallback
 
+   # BSSID Info: 
+    # Bit 0: AP Reachability (1 = reachable)
+    # Bit 1: Security (1 = same security)
+    # Bit 2: Key Scope (1 = AP has same authenticator)
+    # Bit 3-9: Capabilities (HT, VHT, FT, etc.)
     # BSSID Info: ff19 = reachable, same security, same authenticator, HT/VHT capable
     bssid_info = "ff190000"
 
     # PHY Type: 07 = HT (802.11n), 09 = VHT (802.11ac)
     phy_type = "07"
 
-    # Sub-elements: BSS Transition Candidate Preference
+    # Sub-elements: 
+    # 03 = BSS Transition Candidate Preference
+    # 01 = length
+    # 00 = preference value (0-255, higher = better)
     sub_elements = "030100"
     
     return f"{mac_clean}{bssid_info}{op_class}{channel_hex}{phy_type}{sub_elements}"
