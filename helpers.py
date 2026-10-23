@@ -5,8 +5,8 @@ helpers.py - Helper functions and classes for OpenWrt roaming configuration
 import paramiko
 import re
 import json
-from typing import Dict, List, Any, Tuple
-from dataclasses import dataclass
+from typing import Dict, List, Any, Tuple, Optional
+from dataclasses import dataclass, asdict
 
 
 # ============================================================================
@@ -29,14 +29,22 @@ class APInterface:
     
     def is_5ghz(self) -> bool:
         return 5170 <= self.frequency <= 5835
+    
+    def dump(self) -> Dict[str, Any]:
+        """Gibt die Interface-Daten als Dictionary zurück"""
+        return asdict(self)
 
 
 @dataclass
 class APInfo:
     """Complete information about an access point"""
     hostname: str
-    interface_24: APInterface = None
-    interface_5: APInterface = None
+    interface_24: Optional[APInterface] = None
+    interface_5: Optional[APInterface] = None
+
+    def dump(self) -> Dict[str, Any]:
+        """Gibt die gesamten AP-Daten (inklusive Interfaces) als Dictionary zurück"""
+        return asdict(self)
 
 
 # ============================================================================
