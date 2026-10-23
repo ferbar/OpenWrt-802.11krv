@@ -87,12 +87,13 @@ def collect_ap_info(hostname: str, ssid: str) -> APInfo:
             ap_info = APInfo(hostname=hostname)
             
             for iface in interfaces:
+                # print(iface.dump)
                 if iface.ssid == ssid:
                     if iface.is_24ghz():
                         ap_info.interface_24 = iface
                     elif iface.is_5ghz():
                         ap_info.interface_5 = iface
-            
+
             if not ap_info.interface_24 and not ap_info.interface_5:
                 print(f"{Fore.RED}ERROR: No matching SSID found!{Style.RESET_ALL}")
                 pprint(interfaces)
@@ -190,7 +191,7 @@ def configure_neighbors(ap: APInfo, all_aps: List[APInfo], ssid: str, dry_run: b
         iface_name = my_iface.interface
         band_str = "2.4G" if my_iface.is_24ghz() else "5G"
         
-        print(f"  Configuring {band_str} interface ({iface_name}):")
+        print(f"  Configuring {band_str} interface (default_radio{my_iface.phy} - {iface_name}):")
 
         commands.extend([
             f"uci set wireless.default_radio{my_iface.phy}.ieee80211k='1'",
@@ -245,9 +246,11 @@ def configure_neighbors(ap: APInfo, all_aps: List[APInfo], ssid: str, dry_run: b
     
     if dry_run:
         print(f"\n  {Fore.YELLOW}[DRY RUN] Would execute:{Style.RESET_ALL}")
-        print(f"    {commands[0]}")  # Delete old
-        print(f"    ... {neighbor_count} neighbor blocks ...")
-        for cmd in commands[-3:]:  # Last 3 commands
+        #print(f"    {commands[0]}")  # Delete old
+        #print(f"    ... {neighbor_count} neighbor blocks ...")
+        #for cmd in commands[-3:]:  # Last 3 commands
+        #    print(f"    {cmd}")
+        for cmd in commands:
             print(f"    {cmd}")
     else:
         try:
@@ -273,9 +276,9 @@ def configure_r0kh_r1kh(ap: APInfo, all_aps: List[APInfo],
         radios_to_setup.append(ap.interface_5)
     
     for radio in radios_to_setup:
-        if radio.is_24ghz:
+        if radio.is_24ghz():
             print(f"  Configuring 2.4 GHz ({radio.frequency} phy:{radio.phy})")
-        if radio.is_5ghz:
+        if radio.is_5ghz():
             print(f"  Configuring 5 GHz ({radio.frequency} phy:{radio.phy})")
 
         radio_name = f"default_radio{radio.phy}"
@@ -338,12 +341,14 @@ def configure_r0kh_r1kh(ap: APInfo, all_aps: List[APInfo],
     
     if dry_run:
         print(f"\n  {Fore.YELLOW}[DRY RUN] Would execute:{Style.RESET_ALL}")
-        for cmd in commands[:4]:  # First 4 (cleaning)
+        for cmd in commands:
             print(f"    {cmd}")
-        if len(commands) > 8:
-            print(f"    ... ({len(commands) - 8} more r0kh/r1kh commands) ...")
-        for cmd in commands[-2:]:  # Last 2
-            print(f"    {cmd}")
+#        for cmd in commands[:4]:  # First 4 (cleaning)
+#            print(f"    {cmd}")
+#        if len(commands) > 8:
+#            print(f"    ... ({len(commands) - 8} more r0kh/r1kh commands) ...")
+#        for cmd in commands[-2:]:  # Last 2
+#            print(f"    {cmd}")
     else:
         try:
             with SSHConnection(ap.hostname) as ssh:
