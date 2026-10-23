@@ -292,6 +292,9 @@ def configure_r0kh_r1kh(ap: APInfo, all_aps: List[APInfo],
         # WMM default option =1 => müss ma ned extra setzen
         # 802.11v unterstützung aktiviern, das alleine tut noch nix
         commands.append(f"uci set wireless.{radio_name}.bss_transition='1'")
+        # 802.11r fast transition
+        commands.append(f"uci set wireless.{radio_name}.ieee80211r='1'")
+
         commands.append(f"uci set wireless.{radio_name}.mobility_domain='{mobility_domain}'")
         commands.append(f"uci set wireless.{radio_name}.ft_over_ds='1'")
         # mit ft_psk_generate_local=0 bleibt das handy auf einem AP picken. angeblich geht bei '1' auch fast transition mit wpa2/3 mixed
@@ -307,6 +310,7 @@ def configure_r0kh_r1kh(ap: APInfo, all_aps: List[APInfo],
         commands.append(f"uci -q delete wireless.{radio_name}.r0kh || true")
         commands.append(f"uci -q delete wireless.{radio_name}.r1kh || true")
 
+        commands.append(f"uci set wireless.{radio_name}.pmk_r1_push='1'")
         # brauch ma nur fast transition (802.11r) wenn ft_psk_generate_local == 0
         if ft_psk_generate_local == 0:
             for other_ap in all_aps:
