@@ -235,47 +235,39 @@ class SSHConnection:
 # Neighbor Report Generation
 # ============================================================================
 def generate_neighbor_report(mac: str, channel: int) -> str:
-    """
-    Generate 802.11k neighbor report string
-
-    Format: BSSID (12 hex) + BSSID Info (8 hex) + Op Class (2 hex) + Channel (2 hex) + PHY Type (2 hex) + Sub-elements
-
-    Operating Class (for Europe/AT):
-      - 51 (0x33 hex, decimal 81) = 2.4 GHz channels 1-13
-      - 73 (0x49 hex, decimal 115) = 5 GHz channels 36-64
-      - 7c (0x7c hex, decimal 124) = 5 GHz channels 149-165
-    """
     mac_clean = mac.replace(':', '').lower()
-    channel_hex = f"{channel:02x}"
 
-    # Operating Class
-    if channel <= 14:
-        op_class = "51"  # 2.4 GHz (decimal 81 = 0x51 hex!)
-    elif channel >= 36 and channel <= 64:
-        op_class = "73"  # 5 GHz lower (5.15-5.35 GHz)
-    elif channel >= 100 and channel <= 144:
-        op_class = "73"  # 5 GHz middle (5.47-5.725 GHz)
-    elif channel >= 149:
-        op_class = "7c"  # 5 GHz upper (5.725-5.875 GHz)
+    # Operating Class (20 MHz, EU)
+    if channel <= 13:
+        op_class = 0x51
+    elif 36 <= channel <= 48:
+        op_class = 0x73
+    elif 52 <= channel <= 64:
+        op_class = 0x76
+    elif 100 <= channel <= 144:
+        op_class = 0x79
+    elif 149 <= channel <= 161:
+        op_class = 0x7c
+    elif channel == 165:
+        op_class = 0x7d
     else:
-        op_class = "51"  # Fallback
+        raise ValueError(f"Unbekannter Kanal: {channel}")
 
-   # BSSID Info: 
-    # Bit 0: AP Reachability (1 = reachable)
-    # Bit 1: Security (1 = same security)
-    # Bit 2: Key Scope (1 = AP has same authenticator)
-    # Bit 3-9: Capabilities (HT, VHT, FT, etc.)
-    # BSSID Info: ff19 = reachable, same security, same authenticator, HT/VHT capable
-    bssid_info = "ff190000"
+    # BSSID Info (32 Bit, little-endian)
+    info = 0x3          # Bit 0-1: erreichbar
+    info |= 1 << 2      # Security: gleiche
+    info |= 1 << 3      # Key Scope: gleicher Authenticator
+    info |= 1 << 7      # Radio Measurement
+    info |= 1 << 10     # Mobility Domain (FT)
+    info |= 1 << 11     # HT
+    if channel > 14:
+        info |= 1 << 12 # VHT nur auf 5 GHz
 
-    # PHY Type: 07 = HT (802.11n), 09 = VHT (802.11ac)
-    phy_type = "07"
+    phy_type = 0x07 if channel <= 14 else 0x09  # HT bzw. VHT
 
-    # Sub-elements: 
-    # 03 = BSS Transition Candidate Preference
-    # 01 = length
-    # 00 = preference value (0-255, higher = better)
-    sub_elements = "030100"
-    
-    return f"{mac_clean}{bssid_info}{op_class}{channel_hex}{phy_type}{sub_elements}"
-
+    return (
+        mac_clean
+        + info.to_bytes(4, "little").hex()
+        + f"{op_class:02x}{channel:02x}{phy_type:02x}"
+        + "0301ff"   # Transition Candidate Preference
+    )
